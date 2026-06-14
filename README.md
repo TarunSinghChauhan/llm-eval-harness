@@ -60,8 +60,8 @@ Built to solve the #1 unsolved problem in AI deployment: **knowing whether your 
 
 ### Prerequisites
 - Docker Desktop
-- OpenAI API key (platform.openai.com — $5 credit sufficient)
-- Anthropic API key (console.anthropic.com — free credits on signup)
+- COHERE_API_KEY
+- OPENROUTER_API_KEY
 - LangSmith API key (smith.langchain.com — free)
 
 ### 1. Clone and configure
