@@ -2,6 +2,14 @@ import json
 from dataclasses import dataclass
 from datetime import datetime
 
+
+def select_alert_emoji(has_critical: bool) -> str:
+    return "\U0001F6A8" if has_critical else "\u26A0\uFE0F"
+
+
+def select_severity_icon(severity: str) -> str:
+    return "\U0001F534" if severity == "critical" else "\U0001F7E1"
+
 import httpx
 
 from src.core.config import get_settings
@@ -91,11 +99,11 @@ class RegressionDetector:
         critical = [a for a in alerts if a.severity == "critical"]
         warnings = [a for a in alerts if a.severity == "warning"]
 
-        emoji = "🚨" if critical else "⚠️"
+        emoji = select_alert_emoji(bool(critical))
         lines = [f"{emoji} *LLM Eval Regression Detected*\n"]
 
         for alert in alerts:
-            icon = "🔴" if alert.severity == "critical" else "🟡"
+            icon = select_severity_icon(alert.severity)
             lines.append(
                 f"{icon} `{alert.model}` | `{alert.metric}` | "
                 f"{alert.baseline_value:.4f} → {alert.current_value:.4f} "
