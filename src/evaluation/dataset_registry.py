@@ -5,6 +5,11 @@ from typing import Any
 
 from src.core.logging import get_logger
 
+
+def compute_prompts_hash(prompts: list[dict]) -> str:
+    """SHA-256 hash of prompts, key-order-independent via sort_keys, truncated to 12 chars."""
+    return hashlib.sha256(json.dumps(prompts, sort_keys=True).encode()).hexdigest()[:12]
+
 logger = get_logger(__name__)
 
 DATASETS_DIR = Path(__file__).parent.parent.parent / "datasets"
@@ -37,9 +42,7 @@ class DatasetRegistry:
 
     def _save(self, name: str, version: str, data: dict) -> dict:
         data["version"] = version
-        data["hash"] = hashlib.sha256(
-            json.dumps(data["prompts"], sort_keys=True).encode()
-        ).hexdigest()[:12]
+        data["hash"] = compute_prompts_hash(data["prompts"])
         path = DATASETS_DIR / f"{name}_{version}.json"
         with open(path, "w") as f:
             json.dump(data, f, indent=2)
