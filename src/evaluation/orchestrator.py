@@ -139,7 +139,7 @@ class EvalOrchestrator:
                     await self.detector.send_slack_alert(regression_alerts)
 
         # ── 7. Log to MLflow ──────────────────────────────────────────────────
-        adv_summary = adversarial_by_model.get(models[0]) if adversarial_by_model else None
+        adv_summary = select_primary_adversarial_summary(adversarial_by_model, models)
         mlflow_run_id = self.tracker.log_run(
             run_name=run_name,
             models=models,
@@ -195,3 +195,12 @@ class EvalOrchestrator:
 
     async def close(self):
         await self.runner.close()
+
+
+def select_primary_adversarial_summary(adversarial_by_model: dict, models: list[str]) -> dict | None:
+    """Selects the adversarial summary for the first model in the list, for MLflow logging.
+    Note: this only reports adversarial results for models[0] — other models' adversarial
+    results are computed but not included in this particular summary."""
+    if not adversarial_by_model:
+        return None
+    return adversarial_by_model.get(models[0])
