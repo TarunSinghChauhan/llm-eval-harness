@@ -96,3 +96,13 @@ async def test_judge_single_returns_zero_score_when_both_fail(monkeypatch):
     assert result.ensemble_score == 0.0
     assert result.gpt_score is None
     assert result.claude_score is None
+
+
+def test_cohens_kappa_returns_one_when_all_values_fall_in_same_single_bin():
+    # When every score in both lists discretizes to the same single bin,
+    # expected agreement (pe) is exactly 1.0 — the (po - pe) / (1 - pe)
+    # formula would divide by zero, so this special-cases to 1.0 instead.
+    scores_a = [5, 5, 5, 5]
+    scores_b = [5, 5, 5, 5]
+    kappa = LLMJudge.cohens_kappa(scores_a, scores_b)
+    assert kappa == 1.0
