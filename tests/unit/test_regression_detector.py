@@ -74,3 +74,31 @@ async def test_send_slack_alert_posts_payload_when_alerts_exist(monkeypatch):
     mock_async_client.__aenter__.return_value.post.assert_called_once()
     call_kwargs = mock_async_client.__aenter__.return_value.post.call_args
     assert "gpt-4o-mini" in call_kwargs.kwargs["json"]["text"]
+
+
+@pytest.mark.asyncio
+async def test_send_slack_alert_handles_post_failure_gracefully(monkeypatch):
+    from src.monitoring import regression
+    monkeypatch.setattr(regression.settings, "slack_webhook_url", "https://hooks.slack.test/x")
+    detector = RegressionDetector(threshold=0.02)
+
+    current = {"gpt-4o-mini": {"rouge_l": 0.65}}
+    baseline = {"gpt-4o-mini": {"rouge_l": 0.75}}
+    alerts = detector.detect(current, baseline, "run_002", "run_001")
+
+    mock_async_client = AsyncMock()
+    mock_async_client.__aenter__.return_value.post = AsyncMock(side_effect=RuntimeError("connection refused"))
+
+    with patch("src.monitoring.regression.httpx.AsyncClient", return_value=mock_async_client):
+        # Should not raise — failure is caught and logged internally
+        await detector.send_slack_alert(alerts)
+
+
+def test_detect_ignores_metric_missing_from_baseline_for_present_model():
+    detector = RegressionDetector(threshold=0.02)
+    current = {"gpt-4o-mini": {"rouge_l": 0.65, "new_metric": 0.9}}
+    baseline = {"gpt-4o-mini": {"rouge_l": 0.75}}  # no "new_metric" here
+    alerts = detector.detect(current, baseline, "run_002", "run_001")
+    # Only rouge_l should trigger; new_metric has no baseline to compare against
+    assert len(alerts) == 1
+    assert alerts[0].metric == "rouge_l"
