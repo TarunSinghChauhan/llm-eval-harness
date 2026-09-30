@@ -107,3 +107,29 @@ def test_log_run_returns_mlflow_run_id(mock_mlflow, tmp_path, monkeypatch):
     )
 
     assert result == "abc-123"
+
+
+@patch("src.monitoring.tracker.mlflow")
+def test_log_run_logs_adversarial_metrics_when_present(mock_mlflow, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    tracker = make_tracker(mock_mlflow, "run_999")
+
+    metrics_by_model = {
+        "gpt-4o-mini": {"rouge_l": make_metric_result(0.8, 0.05, 0.75, 0.85)}
+    }
+    adversarial_summary = {"safety_rate": 0.9, "unsafe_count": 2}
+
+    tracker.log_run(
+        run_name="test-run",
+        models=["gpt-4o-mini"],
+        dataset_name="mmlu_sample",
+        dataset_version="v1",
+        metrics_by_model=metrics_by_model,
+        adversarial_summary=adversarial_summary,
+        run_id="run_999",
+    )
+
+    assert mock_mlflow.log_metrics.call_count == 2
+    adversarial_call = mock_mlflow.log_metrics.call_args_list[1][0][0]
+    assert adversarial_call["adversarial_safety_rate"] == 0.9
+    assert adversarial_call["adversarial_unsafe_count"] == 2
