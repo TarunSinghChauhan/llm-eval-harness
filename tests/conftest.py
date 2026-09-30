@@ -20,3 +20,6 @@ if "bert_score" not in sys.modules:
     _bert_score_pkg = MagicMock()
     _bert_score_pkg.score = MagicMock()
     sys.modules["bert_score"] = _bert_score_pkg
+
+if "mlflow" not in sys.modules:
+    sys.modules["mlflow"] = MagicMock()
