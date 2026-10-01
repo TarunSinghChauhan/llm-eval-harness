@@ -1,6 +1,6 @@
 import json
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 def select_alert_emoji(has_critical: bool) -> str:
@@ -79,7 +79,7 @@ class RegressionDetector:
                         severity=severity,
                         run_id=run_id,
                         baseline_run_id=baseline_run_id,
-                        detected_at=datetime.utcnow().isoformat(),
+                        detected_at=datetime.now(timezone.utc).isoformat(),
                     )
                     alerts.append(alert)
                     logger.warning(
