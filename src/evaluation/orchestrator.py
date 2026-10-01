@@ -1,6 +1,6 @@
 import asyncio
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from src.evaluation.runner import ModelRunner
@@ -159,7 +159,7 @@ class EvalOrchestrator:
             "dataset_version": dataset_version,
             "n_prompts": len(prompts),
             "models": models,
-            "completed_at": datetime.utcnow().isoformat(),
+            "completed_at": datetime.now(timezone.utc).isoformat(),
             "metrics": {
                 model: {
                     k: {

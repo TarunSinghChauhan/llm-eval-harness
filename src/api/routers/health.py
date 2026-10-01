@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import text
 
 from src.core.database import engine
@@ -25,7 +25,7 @@ async def health():
 
     return {
         "status": overall_status,
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "service": "llm-eval-harness",
         "checks": checks,
     }
