@@ -1,13 +1,19 @@
 from sqlmodel import SQLModel, Field, Column, JSON
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Any
 import uuid
 
 from src.core.config import get_settings
 
 settings = get_settings()
+
+
+def _utcnow() -> datetime:
+    """Naive UTC now. Matches the old datetime.utcnow() value without the deprecation warning."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
 
 # ─── Engine ───────────────────────────────────────────────────────────────────
 engine = create_async_engine(
@@ -43,7 +49,7 @@ class EvalRun(SQLModel, table=True):
     dataset_version: str
     models: list[str] = Field(sa_column=Column(JSON))
     status: str = Field(default="pending")  # pending | running | completed | failed
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=_utcnow)
     completed_at: Optional[datetime] = None
     mlflow_run_id: Optional[str] = None
     config: dict = Field(default_factory=dict, sa_column=Column(JSON))
@@ -67,7 +73,7 @@ class EvalResult(SQLModel, table=True):
     judge_reasoning: Optional[str] = None
     latency_ms: float = 0.0
     token_cost_usd: float = 0.0
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=_utcnow)
 
 
 class EvalMetric(SQLModel, table=True):
@@ -83,7 +89,7 @@ class EvalMetric(SQLModel, table=True):
     ci_lower: float
     ci_upper: float
     n_samples: int
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=_utcnow)
 
 
 class AdversarialResult(SQLModel, table=True):
@@ -98,4 +104,4 @@ class AdversarialResult(SQLModel, table=True):
     response: str
     was_jailbroken: bool = False
     severity: str = "low"  # low | medium | high | critical
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=_utcnow)
