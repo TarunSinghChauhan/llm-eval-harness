@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LLM Evaluation Harness - Scoring Playground</title>
+<style>
+  :root{--bg:#0f1117;--card:#181b24;--border:#262b38;--text:#e6e8ee;--muted:#8a91a5;--accent:#7c8cff;--ok:#3ecf8e;--bad:#ff6b6b;--warn:#f3d36b}
+  @media (prefers-color-scheme: light){:root{--bg:#f6f7fb;--card:#ffffff;--border:#d9dce6;--text:#1c2030;--muted:#5d6580;--accent:#4a5ae8;--ok:#17855a;--bad:#c93a3a;--warn:#8a6d00}}
+  *{box-sizing:border-box}
+  body{margin:0 auto;padding:24px;max-width:1100px;background:var(--bg);color:var(--text);font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;line-height:1.5}
+  h1{font-size:22px;margin:0 0 4px} h2{font-size:16px;margin:26px 0 10px}
+  .sub{color:var(--muted);font-size:13px;margin-bottom:16px}
+  .banner{background:var(--card);border:1px solid var(--border);border-left:4px solid var(--warn);border-radius:8px;padding:12px 14px;font-size:13px;margin-bottom:18px}
+  textarea{width:100%;height:230px;background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:10px;padding:12px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;resize:vertical}
+  .row{display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin:12px 0}
+  button{background:var(--accent);color:#fff;border:0;border-radius:8px;padding:10px 14px;font-size:14px;cursor:pointer}
+  button.secondary{background:transparent;color:var(--text);border:1px solid var(--border)}
+  input[type=number]{width:90px;background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:6px}
+  label{font-size:13px;color:var(--muted)}
+  .scroll{overflow-x:auto}
+  table{width:100%;border-collapse:collapse;font-size:13px;background:var(--card);border:1px solid var(--border);border-radius:8px}
+  th,td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--border);vertical-align:top}
+  th{color:var(--muted);font-weight:500}
+  .pill{padding:2px 9px;border-radius:999px;font-size:11px;font-weight:700;color:#fff}
+  .pill.bad{background:var(--bad)} .pill.ok{background:var(--ok)}
+  .err{color:var(--bad);font-size:13px;margin:8px 0;white-space:pre-wrap}
+  .note{color:var(--muted);font-size:12px;margin-top:8px}
+  .mono{font-family:ui-monospace,Menlo,Consolas,monospace}
+  a{color:var(--accent)}
+</style>
+</head>
+<body>
+<h1>LLM Evaluation Harness: Scoring Playground</h1>
+<div class="sub">Browser demo of the scoring and regression-check logic from <a href="https://github.com/TarunSinghChauhan/llm-eval-harness">llm-eval-harness</a></div>
+
+<div class="banner">
+  <b>What this is:</b> a demo of the harness's scoring math (ROUGE-L, exact match, bootstrap confidence intervals, regression check). It runs entirely in your browser; nothing is uploaded and no model is called.<br>
+  <b>What this is not:</b> a benchmark of real models. The pre-filled sample is illustrative. BERTScore, the LLM-as-judge ensemble and the red-team suite need model APIs and are not run here.
+</div>
+
+<h2>1. Data (one JSON object per line)</h2>
+<div class="note" style="margin:0 0 8px">Fields: <span class="mono">reference</span>, <span class="mono">baseline</span> (output of the current system), <span class="mono">candidate</span> (output of the new system). Edit the sample or paste your own.</div>
+<textarea id="data" spellcheck="false">{"reference": "Water boils at 100 degrees Celsius at sea level", "baseline": "Water boils at 100 degrees Celsius at sea level", "candidate": "Water boils at 100 degrees Celsius"}
+{"reference": "The capital of France is Paris", "baseline": "Paris is the capital of France", "candidate": "France's capital city is Paris"}
+{"reference": "Photosynthesis converts light energy into chemical energy", "baseline": "Photosynthesis converts light energy into chemical energy in plants", "candidate": "Plants make food using sunlight"}
+{"reference": "The Pacific is the largest ocean on Earth", "baseline": "The Pacific Ocean is the largest ocean on Earth", "candidate": "The Atlantic is the largest ocean"}
+{"reference": "Python is a high level programming language", "baseline": "Python is a high level programming language", "candidate": "Python is a programming language"}
+{"reference": "An algorithm is a step by step procedure for solving a problem", "baseline": "An algorithm is a step by step procedure to solve a problem", "candidate": "An algorithm is a set of steps for a problem"}
+{"reference": "The heart pumps blood through the body", "baseline": "The heart pumps blood around the body", "candidate": "The heart pumps blood through the body"}
+{"reference": "Gravity pulls objects toward each other", "baseline": "Gravity pulls objects toward each other", "candidate": "Gravity is a force"}
+{"reference": "DNA carries genetic information", "baseline": "DNA carries genetic information in cells", "candidate": "DNA carries genetic information"}
+{"reference": "The Earth orbits the Sun once a year", "baseline": "The Earth orbits the Sun once every year", "candidate": "The Earth orbits the Sun once a year"}
+{"reference": "A neural network learns patterns from data", "baseline": "A neural network learns patterns from data", "candidate": "A neural network is a machine learning model"}
+{"reference": "HTTP is a protocol for transferring web pages", "baseline": "HTTP is a protocol used for transferring web pages", "candidate": "HTTP transfers web pages"}</textarea>
+
+<div class="row">
+  <button id="run">Run evaluation</button>
+  <button id="reset" class="secondary">Reset sample</button>
+  <label>Regression threshold (absolute drop) <input id="thr" type="number" step="0.01" min="0" value="0.02"></label>
+</div>
+<div id="error" class="err"></div>
+<div id="out"></div>
+
+<h2>How the numbers are computed</h2>
+<div class="note">
+  <b>ROUGE-L F1:</b> longest common subsequence between candidate and reference after lowercasing and splitting into word tokens; F1 of the LCS precision and recall.<br>
+  <b>Exact match:</b> 1 if candidate equals reference after lowercasing and removing punctuation, otherwise 0.<br>
+  <b>95% confidence interval:</b> percentile bootstrap, 1,000 resamples, fixed seed 42, so the same input always gives the same interval.<br>
+  <b>Regression alert:</b> flagged when the candidate mean minus the baseline mean is below minus the threshold (absolute difference, default 0.02).
+</div>
+
+<script>
+var $ = function (id) { return document.getElementById(id); };
+var SAMPLE = $("data").value;
+var MAX_ROWS = 2000, MAX_CHARS = 2000, ITERS = 1000;
+
+function tokens(s) { return String(s).toLowerCase().match(/[a-z0-9]+/g) || []; }
+function lcsLen(a, b) {
+  var prev = new Array(b.length + 1).fill(0), cur = new Array(b.length + 1).fill(0);
+  for (var i = 1; i <= a.length; i++) {
+    for (var j = 1; j <= b.length; j++) {
+      cur[j] = a[i - 1] === b[j - 1] ? prev[j - 1] + 1 : Math.max(prev[j], cur[j - 1]);
+    }
+    var t = prev; prev = cur; cur = t;
+  }
+  return prev[b.length];
+}
+function rougeL(cand, ref) {
+  var c = tokens(cand), r = tokens(ref);
+  if (!c.length || !r.length) return 0;
+  var l = lcsLen(c, r);
+  if (!l) return 0;
+  var p = l / c.length, rc = l / r.length;
+  return 2 * p * rc / (p + rc);
+}
+function norm(s) { return String(s).toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim(); }
+function exact(cand, ref) { return norm(cand) === norm(ref) ? 1 : 0; }
+function mean(a) { var s = 0; for (var i = 0; i < a.length; i++) s += a[i]; return a.length ? s / a.length : 0; }
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    var t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+function bootCI(values) {
+  var rand = mulberry32(42), n = values.length, means = [];
+  if (!n) return [0, 0];
+  for (var k = 0; k < ITERS; k++) {
+    var s = 0;
+    for (var j = 0; j < n; j++) s += values[Math.floor(rand() * n)];
+    means.push(s / n);
+  }
+  means.sort(function (x, y) { return x - y; });
+  return [means[Math.floor(0.025 * ITERS)], means[Math.min(ITERS - 1, Math.floor(0.975 * ITERS))]];
+}
+function f4(x) { return x.toFixed(4); }
+function fci(ci) { return "[" + f4(ci[0]) + ", " + f4(ci[1]) + "]"; }
+
+function el(tag, text, cls) {
+  var e = document.createElement(tag);
+  if (text !== undefined && text !== null) e.textContent = text;
+  if (cls) e.className = cls;
+  return e;
+}
+function table(headers) {
+  var wrap = el("div", null, "scroll"), t = el("table"), thead = el("thead"), tr = el("tr");
+  headers.forEach(function (h) { tr.appendChild(el("th", h)); });
+  thead.appendChild(tr); t.appendChild(thead); t.appendChild(el("tbody")); wrap.appendChild(t);
+  return { wrap: wrap, body: t.lastChild };
+}
+
+function parse(text) {
+  var rows = [], errors = [], lines = text.split("\n");
+  for (var i = 0; i < lines.length; i++) {
+    var line = lines[i].trim();
+    if (!line) continue;
+    if (rows.length >= MAX_ROWS) { errors.push("Only the first " + MAX_ROWS + " rows are used."); break; }
+    try {
+      var o = JSON.parse(line);
+      if (typeof o.reference !== "string" || typeof o.baseline !== "string" || typeof o.candidate !== "string") {
+        errors.push("Line " + (i + 1) + ": needs string fields reference, baseline and candidate.");
+        continue;
+      }
+      rows.push({ reference: o.reference.slice(0, MAX_CHARS), baseline: o.baseline.slice(0, MAX_CHARS), candidate: o.candidate.slice(0, MAX_CHARS) });
+    } catch (e) {
+      errors.push("Line " + (i + 1) + ": not valid JSON.");
+    }
+  }
+  return { rows: rows, errors: errors };
+}
+
+function run() {
+  var out = $("out"), errBox = $("error");
+  out.textContent = ""; errBox.textContent = "";
+  var parsed = parse($("data").value);
+  if (parsed.errors.length) errBox.textContent = parsed.errors.slice(0, 5).join("\n");
+  var rows = parsed.rows;
+  if (!rows.length) { errBox.textContent = (errBox.textContent + "\nNo valid rows to evaluate.").trim(); return; }
+  var thr = parseFloat($("thr").value); if (isNaN(thr) || thr < 0) thr = 0.02;
+
+  var metrics = [
+    { name: "ROUGE-L F1", fn: rougeL },
+    { name: "Exact match", fn: exact }
+  ];
+  var perRouge = [];
+
+  out.appendChild(el("h2", "2. Results (n = " + rows.length + ")"));
+  if (rows.length < 30) out.appendChild(el("div", "Small sample: intervals are wide, so treat differences with caution.", "note"));
+
+  var sum = table(["Metric", "Baseline mean [95% CI]", "Candidate mean [95% CI]", "Difference (candidate - baseline) [95% CI]", "Status"]);
+  metrics.forEach(function (m) {
+    var b = rows.map(function (r) { return m.fn(r.baseline, r.reference); });
+    var c = rows.map(function (r) { return m.fn(r.candidate, r.reference); });
+    var d = c.map(function (v, i) { return v - b[i]; });
+    if (m.name === "ROUGE-L F1") perRouge = { b: b, c: c };
+    var delta = mean(c) - mean(b);
+    var tr = el("tr");
+    tr.appendChild(el("td", m.name));
+    tr.appendChild(el("td", f4(mean(b)) + " " + fci(bootCI(b)), "mono"));
+    tr.appendChild(el("td", f4(mean(c)) + " " + fci(bootCI(c)), "mono"));
+    tr.appendChild(el("td", (delta >= 0 ? "+" : "") + f4(delta) + " " + fci(bootCI(d)), "mono"));
+    var td = el("td");
+    var regress = delta < -thr;
+    td.appendChild(el("span", regress ? "REGRESSION" : "OK", "pill " + (regress ? "bad" : "ok")));
+    tr.appendChild(td);
+    sum.body.appendChild(tr);
+  });
+  out.appendChild(sum.wrap);
+  out.appendChild(el("div", "Regression rule: candidate mean minus baseline mean below -" + thr + " (absolute).", "note"));
+
+  out.appendChild(el("h2", "3. Per-example ROUGE-L"));
+  var det = table(["#", "Reference", "Baseline", "Candidate"]);
+  rows.slice(0, 50).forEach(function (r, i) {
+    var tr = el("tr");
+    tr.appendChild(el("td", String(i + 1)));
+    tr.appendChild(el("td", r.reference));
+    tr.appendChild(el("td", f4(perRouge.b[i]), "mono"));
+    tr.appendChild(el("td", f4(perRouge.c[i]), "mono"));
+    det.body.appendChild(tr);
+  });
+  out.appendChild(det.wrap);
+  if (rows.length > 50) out.appendChild(el("div", "Showing the first 50 rows.", "note"));
+}
+
+$("run").onclick = run;
+$("reset").onclick = function () { $("data").value = SAMPLE; $("out").textContent = ""; $("error").textContent = ""; };
+run();
+</script>
+</body>
+</html>
