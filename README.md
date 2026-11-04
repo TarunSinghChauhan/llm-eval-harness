@@ -66,7 +66,7 @@ Built to solve the #1 unsolved problem in AI deployment: **knowing whether your 
 
 ### 1. Clone and configure
 ```bash
-git clone https://github.com/YOUR_USERNAME/llm-eval-harness
+git clone https://github.com/TarunSinghChauhan/llm-eval-harness
 cd llm-eval-harness
 cp .env.example .env
 # Edit .env and add your API keys
