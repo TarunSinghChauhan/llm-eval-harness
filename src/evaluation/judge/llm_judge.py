@@ -1,5 +1,6 @@
 import asyncio
 import json
+import math
 from dataclasses import dataclass
 
 import openai
@@ -20,6 +21,24 @@ def strip_json_fence(raw: str) -> str:
     elif "```" in raw:
         return raw.split("```")[1].split("```")[0].strip()
     return raw
+
+def parse_judge_score(data) -> float:
+    """Return the judge's 0-10 score, or raise ValueError if the reply has none.
+
+    A reply without a usable score (empty content, no "score" key, NaN, a value outside
+    0-10) used to be recorded as a score of 0 - "completely incorrect" - which is a
+    judgment the judge never made. Raising lets the caller treat it as a failed call.
+    """
+    if not isinstance(data, dict) or "score" not in data:
+        raise ValueError("judge reply has no 'score'")
+    raw = data["score"]
+    if isinstance(raw, bool):
+        raise ValueError("judge score is not a number")
+    score = float(raw)
+    if not math.isfinite(score) or not 0.0 <= score <= 10.0:
+        raise ValueError(f"judge score {score} is outside 0-10")
+    return score
+
 
 JUDGE_SYSTEM_PROMPT = """You are an expert evaluator assessing AI model responses.
 Given a question, a reference answer, and a model's response, score the response from 0 to 10.
@@ -103,7 +122,7 @@ Score the model response."""
                 prompt_id=prompt_id,
                 model_judged=model_judged,
                 judge_model="gpt-4o-mini",
-                score=float(data.get("score", 0)),
+                score=parse_judge_score(data),
                 reasoning=data.get("reasoning", ""),
                 raw_response=raw,
             )
@@ -137,7 +156,7 @@ Score the model response."""
                 prompt_id=prompt_id,
                 model_judged=model_judged,
                 judge_model="claude-3-haiku",
-                score=float(data.get("score", 0)),
+                score=parse_judge_score(data),
                 reasoning=data.get("reasoning", ""),
                 raw_response=raw,
             )

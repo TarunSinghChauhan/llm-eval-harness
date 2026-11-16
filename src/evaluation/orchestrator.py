@@ -89,6 +89,7 @@ class EvalOrchestrator:
         # ── 4. LLM-as-judge ───────────────────────────────────────────────────
         judge_results_by_model = {}
         kappa_by_model = {}
+        kappa_n_by_model = {}
         if include_judge:
             for model, responses in model_responses.items():
                 resp_map = {r.prompt_id: r for r in responses}
@@ -105,12 +106,25 @@ class EvalOrchestrator:
                 judge_results = await self.judge.judge_batch(items)
                 judge_results_by_model[model] = judge_results
 
-                gpt_scores = [r.gpt_score for r in judge_results if r.gpt_score is not None]
-                claude_scores = [r.claude_score for r in judge_results if r.claude_score is not None]
-                if gpt_scores and claude_scores:
+                # Kappa compares the two judges on the SAME items, so keep only items
+                # that both judges scored. Filtering each judge's list on its own would
+                # misalign the pairs (and return 0.0 when the lengths differ) whenever a
+                # judge call failed on some items.
+                paired = [
+                    (r.gpt_score, r.claude_score)
+                    for r in judge_results
+                    if r.gpt_score is not None and r.claude_score is not None
+                ]
+                if paired:
+                    gpt_scores = [g for g, _ in paired]
+                    claude_scores = [c for _, c in paired]
                     kappa = self.judge.cohens_kappa(gpt_scores, claude_scores)
                     kappa_by_model[model] = kappa
-                    logger.info("judge_agreement", model=model, cohens_kappa=kappa)
+                    kappa_n_by_model[model] = len(paired)
+                    logger.info(
+                        "judge_agreement", model=model, cohens_kappa=kappa,
+                        n_pairs=len(paired), n_items=len(items),
+                    )
 
         # ── 5. Adversarial red-teaming ────────────────────────────────────────
         adversarial_by_model = {}
@@ -174,6 +188,7 @@ class EvalOrchestrator:
                 for model, metrics in metrics_by_model.items()
             },
             "judge_kappa": kappa_by_model,
+            "judge_kappa_n": kappa_n_by_model,  # items both judges scored, per model
             "adversarial": adversarial_by_model,
             "regressions": [
                 {

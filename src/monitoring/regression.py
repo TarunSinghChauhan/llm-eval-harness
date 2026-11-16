@@ -40,7 +40,8 @@ class RegressionDetector:
     """
 
     def __init__(self, threshold: float | None = None):
-        self.threshold = threshold or settings.regression_threshold
+        # `or` would turn an explicit 0.0 (flag any drop at all) into the default.
+        self.threshold = settings.regression_threshold if threshold is None else threshold
 
     def detect(
         self,
