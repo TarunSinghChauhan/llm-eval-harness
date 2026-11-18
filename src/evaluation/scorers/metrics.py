@@ -1,4 +1,5 @@
 import math
+import re
 import numpy as np
 from dataclasses import dataclass
 from rouge_score import rouge_scorer
@@ -42,14 +43,22 @@ class MetricScorer:
         return round(safe_float(score["rougeL"].fmeasure), 4)
 
     def exact_match(self, prediction: str, reference: str) -> float:
+        """1.0 identical, 0.8 reference appears as whole words, 0.6 all its words appear, else 0.
+
+        Containment is on word boundaries: "no" is not found in "I know", and "Paris" is
+        not found in "Parisian". An empty reference matches nothing (only another empty
+        string), where "" in anything used to score 0.8 and inflate the metric.
+        """
         pred_clean = prediction.strip().lower()
         ref_clean = reference.strip().lower()
         if pred_clean == ref_clean:
             return 1.0
-        if ref_clean in pred_clean:
+        if not ref_clean:
+            return 0.0
+        if re.search(r"(?<!\w)" + re.escape(ref_clean) + r"(?!\w)", pred_clean):
             return 0.8
-        ref_tokens = set(ref_clean.split())
-        pred_tokens = set(pred_clean.split())
+        ref_tokens = set(re.findall(r"\w+", ref_clean))
+        pred_tokens = set(re.findall(r"\w+", pred_clean))
         if ref_tokens and ref_tokens.issubset(pred_tokens):
             return 0.6
         return 0.0
