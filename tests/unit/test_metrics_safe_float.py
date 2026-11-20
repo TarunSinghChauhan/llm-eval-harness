@@ -80,14 +80,11 @@ def test_bert_score_batch_returns_rounded_f1_scores_on_success():
     assert result == [0.8123, 0.55]
 
 
-def test_bert_score_batch_falls_back_to_rouge_l_on_exception():
+def test_bert_score_batch_returns_none_on_exception():
     scorer = MetricScorer()
-    fake_score_obj = MagicMock()
-    fake_score_obj.fmeasure = 0.5
-    scorer._rouge.score.return_value = {"rougeL": fake_score_obj}
     with patch("src.evaluation.scorers.metrics.bert_score_fn", side_effect=RuntimeError("model load failed")):
         result = scorer.bert_score_batch(["pred1"], ["ref1"])
-    assert result == [0.5]
+    assert result == [None]
 
 
 def test_score_all_builds_scored_pairs_for_each_prompt():
