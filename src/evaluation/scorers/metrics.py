@@ -9,6 +9,8 @@ from src.core.logging import get_logger
 
 logger = get_logger(__name__)
 
+METRIC_NAMES = ("rouge_l", "bert_score", "exact_match")
+
 
 def safe_float(val):
     if val is None or (isinstance(val, float) and (math.isnan(val) or math.isinf(val))):
@@ -30,7 +32,7 @@ class MetricResult:
 class ScoredPair:
     prompt_id: str
     rouge_l: float
-    bert_score: float
+    bert_score: float | None  # None when BERTScore could not be computed
     exact_match: float
 
 
@@ -63,7 +65,14 @@ class MetricScorer:
             return 0.6
         return 0.0
 
-    def bert_score_batch(self, predictions: list[str], references: list[str]) -> list[float]:
+    def bert_score_batch(self, predictions: list[str], references: list[str]) -> list[float | None]:
+        """BERTScore F1 per pair, or None for every pair when it could not be computed.
+
+        This used to fall back to ROUGE-L values on failure and report them as
+        "bert_score". The two are different measures, so a run where the model download or
+        GPU failed produced a bert_score column that was really rouge_l, which then got
+        compared against real BERTScore baselines for regression alerts.
+        """
         if not predictions:
             return []
         try:
@@ -77,7 +86,7 @@ class MetricScorer:
             return [round(safe_float(s), 4) for s in f1]
         except Exception as e:
             logger.error("bert_score_failed", error=str(e))
-            return [self.rouge_l(p, r) for p, r in zip(predictions, references)]
+            return [None] * len(predictions)
 
     def score_all(self, predictions, references, prompt_ids):
         rouge_scores = [self.rouge_l(p, r) for p, r in zip(predictions, references)]
@@ -109,8 +118,11 @@ class MetricScorer:
         )
 
     def aggregate(self, scored_pairs: list[ScoredPair], n_iterations: int = 1000) -> dict[str, MetricResult]:
-        return {
-            "rouge_l": self.bootstrap_ci([s.rouge_l for s in scored_pairs], n_iterations),
-            "bert_score": self.bootstrap_ci([s.bert_score for s in scored_pairs], n_iterations),
-            "exact_match": self.bootstrap_ci([s.exact_match for s in scored_pairs], n_iterations),
-        }
+        result = {"rouge_l": self.bootstrap_ci([s.rouge_l for s in scored_pairs], n_iterations)}
+        # Only pairs that have a real BERTScore count; with none, the metric is left out
+        # rather than reported as 0.0 (which would also read as a regression).
+        bert_scores = [s.bert_score for s in scored_pairs if s.bert_score is not None]
+        if bert_scores:
+            result["bert_score"] = self.bootstrap_ci(bert_scores, n_iterations)
+        result["exact_match"] = self.bootstrap_ci([s.exact_match for s in scored_pairs], n_iterations)
+        return result

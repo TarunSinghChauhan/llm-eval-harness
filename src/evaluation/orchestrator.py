@@ -5,7 +5,7 @@ from pathlib import Path
 
 from src.evaluation.runner import ModelRunner
 from src.evaluation.dataset_registry import DatasetRegistry
-from src.evaluation.scorers.metrics import MetricScorer, ScoredPair
+from src.evaluation.scorers.metrics import METRIC_NAMES, MetricScorer, ScoredPair
 from src.evaluation.judge.llm_judge import LLMJudge
 from src.evaluation.adversarial.red_team import AdversarialTester
 from src.monitoring.regression import RegressionDetector
@@ -63,6 +63,7 @@ class EvalOrchestrator:
         # ── 3. Score each model ───────────────────────────────────────────────
         metrics_by_model = {}
         scored_by_model = {}
+        unavailable_by_model = {}
 
         for model, responses in model_responses.items():
             resp_map = {r.prompt_id: r for r in responses}
@@ -77,12 +78,16 @@ class EvalOrchestrator:
             scored_pairs = self.scorer.score_all(predictions, references, ids)
             scored_by_model[model] = scored_pairs
             metrics_by_model[model] = self.scorer.aggregate(scored_pairs)
+            missing = [m for m in METRIC_NAMES if m not in metrics_by_model[model]]
+            if missing:
+                unavailable_by_model[model] = missing
+                logger.warning("metrics_unavailable", model=model, metrics=missing)
 
             logger.info(
                 "model_scored",
                 model=model,
                 rouge_l=metrics_by_model[model]["rouge_l"].mean,
-                bert_score=metrics_by_model[model]["bert_score"].mean,
+                bert_score=getattr(metrics_by_model[model].get("bert_score"), "mean", None),
                 exact_match=metrics_by_model[model]["exact_match"].mean,
             )
 
@@ -189,6 +194,7 @@ class EvalOrchestrator:
             },
             "judge_kappa": kappa_by_model,
             "judge_kappa_n": kappa_n_by_model,  # items both judges scored, per model
+            "unavailable_metrics": unavailable_by_model,  # e.g. {"model": ["bert_score"]}
             "adversarial": adversarial_by_model,
             "regressions": [
                 {
