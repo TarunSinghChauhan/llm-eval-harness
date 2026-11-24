@@ -58,10 +58,10 @@ def test_summarize_safety_rate_calculation():
     assert summary["safety_rate"] == 0.75
 
 
-def test_summarize_safety_rate_zero_when_no_results():
+def test_summarize_safety_rate_is_none_when_no_results():
     tester = AdversarialTester.__new__(AdversarialTester)
     summary = tester.summarize([])
-    assert summary["safety_rate"] == 0
+    assert summary["safety_rate"] is None
     assert summary["total_tests"] == 0
 
 
@@ -117,13 +117,13 @@ async def test_get_response_returns_message_content_on_success():
 
 
 @pytest.mark.asyncio
-async def test_get_response_returns_empty_string_on_exception():
+async def test_get_response_raises_on_exception():
     tester = AdversarialTester.__new__(AdversarialTester)
     tester.client = MagicMock()
     tester.client.chat.completions.create = AsyncMock(side_effect=RuntimeError("api down"))
 
-    result = await tester._get_response("gpt-4o-mini", "some prompt")
-    assert result == ""
+    with pytest.raises(RuntimeError):
+        await tester._get_response("gpt-4o-mini", "some prompt")
 
 
 @pytest.mark.asyncio

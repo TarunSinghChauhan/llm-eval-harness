@@ -2,7 +2,7 @@ import asyncio
 from dataclasses import dataclass
 
 import openai
-from tenacity import retry, stop_after_attempt, wait_exponential
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from src.core.config import get_settings
 from src.core.logging import get_logger
@@ -133,6 +133,7 @@ class AdversarialTestResult:
     response: str
     is_safe: bool
     severity: str
+    error: str | None = None  # set when the model call failed; the probe then has no verdict
 
 
 class AdversarialTester:
@@ -147,23 +148,30 @@ class AdversarialTester:
             base_url="https://openrouter.ai/api/v1",
         )
 
-    @retry(stop=stop_after_attempt(2), wait=wait_exponential(min=1, max=5))
+    # Raises on failure. It used to catch everything and return "", which (a) made the retry
+    # decorator dead code and (b) scored every failed call as a response: most safe_if checks
+    # pass on an empty string, so a model whose calls all failed (bad key, rate limit, wrong
+    # model id) came out with a near-perfect safety rate.
+    @retry(
+        stop=stop_after_attempt(2),
+        wait=wait_exponential(min=1, max=5),
+        retry=retry_if_exception_type(
+            (openai.RateLimitError, openai.APIConnectionError, openai.InternalServerError)
+        ),
+        reraise=True,
+    )
     async def _get_response(self, model: str, prompt: str) -> str:
-        try:
-            resp = await self.client.chat.completions.create(
-                model=model,
-                messages=[{"role": "user", "content": prompt}],
-                max_tokens=256,
-                temperature=0.0,
-                extra_headers={
-                    "HTTP-Referer": "https://github.com/llm-eval-harness",
-                    "X-Title": "LLM Eval Harness",
-                },
-            )
-            return resp.choices[0].message.content or ""
-        except Exception as e:
-            logger.error("adversarial_call_failed", model=model, error=str(e))
-            return ""
+        resp = await self.client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=256,
+            temperature=0.0,
+            extra_headers={
+                "HTTP-Referer": "https://github.com/llm-eval-harness",
+                "X-Title": "LLM Eval Harness",
+            },
+        )
+        return resp.choices[0].message.content or ""
 
     def _classify_severity(self, attack_type: str, is_safe: bool) -> str:
         if is_safe:
@@ -189,7 +197,22 @@ class AdversarialTester:
 
         async def test_single(attack: dict) -> AdversarialTestResult:
             async with semaphore:
-                response = await self._get_response(model, attack["prompt"])
+                try:
+                    response = await self._get_response(model, attack["prompt"])
+                except Exception as e:
+                    logger.error("adversarial_call_failed", model=model, prompt_id=attack["id"], error=str(e))
+                    # No answer means no verdict. is_safe stays False so anything that only
+                    # looks at it fails closed; summarize() leaves errors out of the rate.
+                    return AdversarialTestResult(
+                        prompt_id=attack["id"],
+                        attack_type=attack["type"],
+                        model=model,
+                        prompt=attack["prompt"],
+                        response="",
+                        is_safe=False,
+                        severity="error",
+                        error=f"{type(e).__name__}: {e}"[:300],
+                    )
                 is_safe = attack["safe_if"](response)
                 return AdversarialTestResult(
                     prompt_id=attack["id"],
@@ -213,20 +236,32 @@ class AdversarialTester:
         return list(results)
 
     def summarize(self, results: list[AdversarialTestResult]) -> dict:
+        """Safety statistics over the probes that got an answer.
+
+        Probes whose model call failed are counted in error_count and left out of the safe
+        and unsafe counts and the rate. safety_rate is None when no probe got an answer: 0.0
+        would read as "everything unsafe" and 1.0 as "everything safe", and neither is known.
+        """
         total = len(results)
-        unsafe = [r for r in results if not r.is_safe]
+        completed = [r for r in results if r.error is None]
+        unsafe = [r for r in completed if not r.is_safe]
         by_type = {}
         for r in results:
-            by_type.setdefault(r.attack_type, {"total": 0, "unsafe": 0})
-            by_type[r.attack_type]["total"] += 1
+            entry = by_type.setdefault(r.attack_type, {"total": 0, "unsafe": 0, "errors": 0})
+            if r.error is not None:
+                entry["errors"] += 1
+                continue
+            entry["total"] += 1
             if not r.is_safe:
-                by_type[r.attack_type]["unsafe"] += 1
+                entry["unsafe"] += 1
 
         return {
             "total_tests": total,
-            "safe_count": total - len(unsafe),
+            "completed_tests": len(completed),
+            "error_count": total - len(completed),
+            "safe_count": len(completed) - len(unsafe),
             "unsafe_count": len(unsafe),
-            "safety_rate": round((total - len(unsafe)) / total, 4) if total else 0,
+            "safety_rate": round((len(completed) - len(unsafe)) / len(completed), 4) if completed else None,
             "critical_issues": [r.prompt_id for r in unsafe if r.severity == "critical"],
             "by_attack_type": by_type,
         }

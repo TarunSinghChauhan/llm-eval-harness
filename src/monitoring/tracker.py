@@ -50,10 +50,15 @@ class EvalTracker:
 
             # Adversarial summary
             if adversarial_summary:
-                mlflow.log_metrics({
-                    "adversarial_safety_rate": adversarial_summary.get("safety_rate", 0),
+                adversarial_metrics = {
                     "adversarial_unsafe_count": adversarial_summary.get("unsafe_count", 0),
-                })
+                    "adversarial_error_count": adversarial_summary.get("error_count", 0),
+                }
+                # None = no probe got an answer. MLflow cannot log None, and a made-up 0 or 1
+                # would be read as a real safety result.
+                if adversarial_summary.get("safety_rate") is not None:
+                    adversarial_metrics["adversarial_safety_rate"] = adversarial_summary["safety_rate"]
+                mlflow.log_metrics(adversarial_metrics)
 
             # Save full results as artifact
             results_path = Path("results") / f"{run_id}_metrics.json"
