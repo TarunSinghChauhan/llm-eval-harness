@@ -138,6 +138,13 @@ class ModelRunner:
                 return await self.run_single(model, p["id"], p["prompt"], system)
 
         results = await asyncio.gather(*[run_with_semaphore(p) for p in prompts], return_exceptions=True)
+        failed = [p["id"] for p, r in zip(prompts, results) if isinstance(r, Exception)]
+        if failed:
+            # Each failure is already logged by run_single; this says how much of the batch is
+            # missing, so a model that answered 3 of 50 prompts is not mistaken for a full run.
+            logger.warning(
+                "batch_incomplete", model=model, failed=len(failed), total=len(prompts), failed_ids=failed[:20],
+            )
         return [r for r in results if not isinstance(r, Exception)]
 
     async def run_all_models(self, models, prompts, system="You are a helpful assistant. Answer concisely and accurately."):

@@ -64,16 +64,37 @@ class EvalOrchestrator:
         metrics_by_model = {}
         scored_by_model = {}
         unavailable_by_model = {}
+        failed_by_model = {}
+        scored_counts = {}
 
         for model, responses in model_responses.items():
             resp_map = {r.prompt_id: r for r in responses}
             predictions, references, ids = [], [], []
+
+            # Prompts whose model call failed are missing from resp_map. Without recording them,
+            # a model that answered 1 of 50 prompts was reported with the score of that one answer
+            # (or, if all calls failed, with 0.0 scores that read as a total regression).
+            failed_ids = [p["id"] for p in prompts if p["id"] not in resp_map]
+            scored_counts[model] = len(prompts) - len(failed_ids)
+            if failed_ids:
+                failed_by_model[model] = failed_ids
+                logger.warning(
+                    "model_prompts_failed", model=model, failed=len(failed_ids), total=len(prompts),
+                )
 
             for p in prompts:
                 if p["id"] in resp_map:
                     predictions.append(resp_map[p["id"]].response_text)
                     references.append(p["reference"])
                     ids.append(p["id"])
+
+            if not ids:
+                # Nothing to score: report no metrics rather than 0.0, which would look like
+                # the model got every answer wrong (and trip regression alerts).
+                scored_by_model[model] = []
+                metrics_by_model[model] = {}
+                logger.error("model_has_no_responses", model=model, total=len(prompts))
+                continue
 
             scored_pairs = self.scorer.score_all(predictions, references, ids)
             scored_by_model[model] = scored_pairs
@@ -178,6 +199,9 @@ class EvalOrchestrator:
             "dataset_version": dataset_version,
             "n_prompts": len(prompts),
             "models": models,
+            "complete": not failed_by_model,  # False if any model call failed
+            "n_scored": scored_counts,  # prompts each model answered, out of n_prompts
+            "failed_prompts": failed_by_model,  # {model: [prompt ids whose call failed]}
             "completed_at": datetime.now(timezone.utc).isoformat(),
             "metrics": {
                 model: {
